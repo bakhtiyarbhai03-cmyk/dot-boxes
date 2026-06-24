@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#0f172a">
-        <title>Dots & Boxes ULTRA</title>
+    <title>Dots & Boxes ULTRA</title>
     <link rel="manifest" href="manifest.json">
     <link rel="icon" type="image/svg+xml" href="icon.svg">
     
@@ -70,7 +70,7 @@
         .btn.daily { background: linear-gradient(45deg, #ff9f1c, #e71d36); border: none; color: white; animation: pulseGlow 2s infinite alternate;}
         @keyframes pulseGlow { to { box-shadow: 0 0 15px #ff9f1c; } }
 
-        .btn-icon { background: rgba(0,0,0,0.3); border: 1px solid var(--bord); color: var(--txt); width: 45px; height: 45px; border-radius: 12px; font-size: 1.2rem; display: flex; justify-content: center; align-items: center; cursor: pointer; }
+        .btn-icon { background: rgba(0,0,0,0.3); border: 1px solid var(--bord); color: var(--txt); width: 45px; height: 45px; border-radius: 12px; font-size: 1.2rem; display: flex; justify-content: center; align-items: center; cursor: pointer; transition: background 0.2s; }
         .btn-icon:active { background: var(--prim); }
         
         .row { display: flex; gap: 10px; width: 100%; }
@@ -194,7 +194,7 @@
     <div id="scr-ai" class="screen">
         <div class="card">
             <h2>🤖 Play AI</h2>
-            <select id="ai-lvl"><option value="easy">Beginner (Random)</option><option value="medium">Tactical (Heuristic)</option><option value="hard">Expert (Minimax)</option><option value="grandmaster">Grandmaster (Alpha-Beta Deep)</option></select>
+            <select id="ai-lvl"><option value="easy">Beginner (Random)</option><option value="medium">Intermediate (Greedy)</option><option value="hard">Expert (Minimax)</option><option value="grandmaster">Grandmaster (Alpha-Beta)</option></select>
             <select id="ai-pers"><option value="balanced">Balanced Personality</option><option value="aggr">Aggressive</option><option value="def">Defensive</option><option value="chaos">Chaos</option></select>
             <button class="btn primary" onclick="Game.start('ai')">Challenge AI</button><button class="btn" onclick="UI.nav('scr-main')">Back</button>
         </div>
@@ -241,6 +241,7 @@
             <div style="font-weight:900; text-align:center;">Replay Mode</div>
             <input type="range" id="rep-slide" min="0" max="0" value="0" oninput="Replay.seek(this.value)">
             <div class="row" style="justify-content:center;">
+                <button class="btn-icon" onclick="Replay.toggleAnalytics()" id="rep-ana" title="Toggle Missed Box Analytics">👁️</button>
                 <button class="btn-icon" onclick="Replay.speed(0.5)">0.5x</button>
                 <button class="btn-icon" onclick="Replay.playPause()" id="rep-pp">▶</button>
                 <button class="btn-icon" onclick="Replay.speed(2)">2x</button>
@@ -264,7 +265,6 @@ if ('serviceWorker' in navigator) {
     });
 }
 
-
 /** =======================================================================
  * CORE DATA & UTILS
  * ======================================================================= */
@@ -283,7 +283,12 @@ const CONST = {
         {id:'box_100', n:'Century Maker', d:'Capture 100 boxes', i:'📦'}, {id:'box_1000', n:'Box Lord', d:'Capture 1000 boxes', i:'🏰'},
         {id:'ai_med', n:'Tactician', d:'Beat Medium AI', i:'🧠'}, {id:'ai_exp', n:'Grandmaster', d:'Beat Expert/GM AI', i:'👑'},
         {id:'online_win', n:'Gladiator', d:'Win an online match', i:'⚔️'}, {id:'perfect', n:'Flawless', d:'Win allowing 0 boxes', i:'✨'},
-        {id:'daily', n:'Dedicated', d:'Beat a Daily Challenge', i:'📅'}
+        {id:'daily', n:'Dedicated', d:'Beat a Daily Challenge', i:'📅'},
+        {id:'speed_demon', n:'Speed Demon', d:'Win in under 60 seconds', i:'⚡'},
+        {id:'epic_win', n:'Epic Conqueror', d:'Win on a 10x10 board', i:'🌌'},
+        {id:'chain_master', n:'Combo Master', d:'Capture 5+ boxes in one turn', i:'🔗'},
+        {id:'veteran', n:'Veteran', d:'Play 50 total matches', i:'🎖️'},
+        {id:'blitz_king', n:'Time Lord', d:'Win a Blitz/Bullet match', i:'⏳'}
     ],
     themes: ['cyberpunk','galaxy','ocean','forest','sunset','retro','minimalist','gold']
 };
@@ -453,19 +458,23 @@ const ThemeMgr = {
 };
 
 /** =======================================================================
- * GAME STATE MANAGER & SNAPSHOTS (O(1) Undo/Redo)
+ * GAME STATE MANAGER & SNAPSHOTS (O(1) Memory Architecture)
  * ======================================================================= */
 const STATE = {
     mode: '', rules: { limit: 0, blitz: false }, grid: 6, turn: 1, sc: [0,0,0],
     h: [], v: [], b: [], p1:{n:'',s:'',c:''}, p2:{n:'',s:'',c:''}, spec: false,
-    timer: null, sec: 0, moveTime: 0, isDaily: false, hint: null, lastMove: null
+    timer: null, sec: 0, moveTime: 0, isDaily: false, hint: null, lastMove: null, combo: 0
 };
 
 const History = {
     snaps: [], cur: -1,
     reset() { this.snaps=[]; this.cur=-1; this.save(); },
     save() {
-        const snap = { h:Utils.clone(STATE.h), v:Utils.clone(STATE.v), b:Utils.clone(STATE.b), sc:[...STATE.sc], turn:STATE.turn };
+        const snap = { 
+            h:Utils.clone(STATE.h), v:Utils.clone(STATE.v), b:Utils.clone(STATE.b), 
+            sc:[...STATE.sc], turn:STATE.turn, lastMove: STATE.lastMove ? Utils.clone(STATE.lastMove) : null,
+            combo: STATE.combo // FIX: Save current combo state
+        };
         this.snaps = this.snaps.slice(0, this.cur+1); this.snaps.push(snap); this.cur++;
         Utils.el('btn-undo').style.opacity = this.cur>0?1:0.3; Utils.el('btn-redo').style.opacity = this.cur<this.snaps.length-1?1:0.3;
     },
@@ -475,22 +484,14 @@ const History = {
         this.cur = n; const s = this.snaps[n];
         STATE.h=Utils.clone(s.h); STATE.v=Utils.clone(s.v); STATE.b=Utils.clone(s.b); STATE.sc=[...s.sc]; STATE.turn=s.turn;
         STATE.lastMove = null; 
+        STATE.combo = s.combo || 0; // FIX: Restore combo state on undo/redo
         Utils.el('btn-undo').style.opacity = this.cur>0?1:0.3; Utils.el('btn-redo').style.opacity = this.cur<this.snaps.length-1?1:0.3;
         UI.updHUD(); Render.flagDirty();
-    },
-    undo() { this.load(-1); if(STATE.mode==='ai' && STATE.turn===2) this.load(-1); },
-    redo() { this.load(1); if(STATE.mode==='ai' && STATE.turn===2) this.load(1); },
-    getMoveList() { 
-        let m=[]; for(let i=1;i<this.snaps.length;i++){
-            let p=this.snaps[i-1], c=this.snaps[i];
-            for(let r=0;r<STATE.grid;r++)for(let l=0;l<STATE.grid-1;l++) if(!p.h[r][l]&&c.h[r][l]) m.push({t:'h',r,c:l,p:p.turn});
-            for(let r=0;r<STATE.grid-1;r++)for(let l=0;l<STATE.grid;l++) if(!p.v[r][l]&&c.v[r][l]) m.push({t:'v',r,c:l,p:p.turn});
-        } return m;
     }
 };
 
 /** =======================================================================
- * RENDER ENGINE
+ * RENDER ENGINE (PHASE 3 SCALING OVERHAUL)
  * ======================================================================= */
 const Render = {
     cvs: Utils.el('gameCanvas'), ctx: Utils.el('gameCanvas').getContext('2d'),
@@ -510,11 +511,13 @@ const Render = {
     loop() {
         this.anim = requestAnimationFrame(()=>this.loop());
         let actP = false; this.pool.forEach(p=>{if(p.a)actP=true;});
-        if(!this.dirty && !actP && !Game.dragS && !STATE.hint) return; 
+        if(!this.dirty && !actP && !Game.dragS && !STATE.hint && !Replay.showAnalytics) return; 
         
         this.ctx.clearRect(0,0,this.cvs.width,this.cvs.height); this.dirty = false;
         
-        this.ctx.font = `900 ${this.sp*0.45}px var(--font)`; this.ctx.textAlign='center'; this.ctx.textBaseline='middle';
+        // Boxes - PHASE 3 UPGRADE: Scaled Emojis up to 65% of grid box size
+        this.ctx.font = `900 ${this.sp*0.65}px var(--font)`; 
+        this.ctx.textAlign='center'; this.ctx.textBaseline='middle';
         for (let r=0; r<STATE.grid-1; r++) for (let c=0; c<STATE.grid-1; c++) {
             if (STATE.b[r][c] !== 0) {
                 let o=STATE.b[r][c], bx=this.ox+(c+0.5)*this.sp, by=this.oy+(r+0.5)*this.sp;
@@ -523,6 +526,7 @@ const Render = {
             }
         }
         
+        // Lines
         this.ctx.lineCap='round'; this.ctx.lineWidth=Math.max(4, this.sp*0.1);
         const drawL = (x1,y1,x2,y2, c) => { this.ctx.strokeStyle=c; this.ctx.beginPath(); this.ctx.moveTo(x1,y1); this.ctx.lineTo(x2,y2); this.ctx.stroke(); };
         let lm = STATE.lastMove;
@@ -536,12 +540,34 @@ const Render = {
             drawL(this.ox+c*this.sp, this.oy+r*this.sp, this.ox+c*this.sp, this.oy+(r+1)*this.sp, color);
         }
 
+        // PHASE 3 REPLAY ANALYTICS (Missed Box Highlighting)
+        if (Replay.active && Replay.showAnalytics) {
+            for (let r=0; r<STATE.grid-1; r++) {
+                for (let c=0; c<STATE.grid-1; c++) {
+                    if (STATE.b[r][c] === 0) {
+                        let lines = (STATE.h[r][c]?1:0) + (STATE.h[r+1][c]?1:0) + (STATE.v[r][c]?1:0) + (STATE.v[r][c+1]?1:0);
+                        if (lines === 3) {
+                            this.ctx.fillStyle = 'rgba(239, 68, 68, 0.4)'; // Red background for Danger/Blunder
+                            let bx = this.ox+(c+0.5)*this.sp, by = this.oy+(r+0.5)*this.sp;
+                            this.ctx.fillRect(bx-this.sp*0.45, by-this.sp*0.45, this.sp*0.9, this.sp*0.9);
+                            this.ctx.fillStyle = '#fff';
+                            this.ctx.font = `900 ${this.sp*0.35}px var(--font)`;
+                            this.ctx.fillText("⚠️", bx, by);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Hint & Drag
         if (STATE.hint) { this.ctx.globalAlpha=Math.abs(Math.sin(Date.now()/200)); let h=STATE.hint; drawL(this.ox+h.c*this.sp, this.oy+h.r*this.sp, this.ox+(h.c+(h.t==='h'?1:0))*this.sp, this.oy+(h.r+(h.t==='v'?1:0))*this.sp, Utils.varColor('--warning')); this.ctx.globalAlpha=1; this.dirty=true; }
         if (Game.dragS && Game.dragC) { this.ctx.globalAlpha=0.5; drawL(Game.dragS.x, Game.dragS.y, Game.dragC.x, Game.dragC.y, STATE.turn===1?STATE.p1.c:STATE.p2.c); this.ctx.globalAlpha=1; this.dirty=true; }
 
+        // Dots
         this.ctx.fillStyle = Utils.varColor('--dot');
         for(let r=0; r<STATE.grid; r++) for(let c=0; c<STATE.grid; c++) { this.ctx.beginPath(); this.ctx.arc(this.ox+c*this.sp, this.oy+r*this.sp, Math.max(3, this.sp*0.08), 0, Math.PI*2); this.ctx.fill(); }
         
+        // Particles
         this.pool.forEach(p=>{ if(p.a) { this.ctx.globalAlpha=Math.max(0,p.l); this.ctx.fillStyle=p.c; this.ctx.beginPath(); this.ctx.arc(p.x,p.y,4,0,Math.PI*2); this.ctx.fill(); p.x+=p.vx; p.y+=p.vy; p.l-=0.05; if(p.l<=0)p.a=false; }}); this.ctx.globalAlpha=1;
     }
 };
@@ -568,7 +594,7 @@ const Game = {
     },
     quickPlay() { this.start('ai'); },
     startDaily() { 
-        STATE.isDaily=true; Utils.el('s-board').value=8; Utils.el('ai-lvl').value='hard'; 
+        STATE.isDaily=true; Utils.el('s-board').value=8; Utils.el('ai-lvl').value='grandmaster'; 
         this.start('ai'); STATE.rules.blitz=true;
     },
     
@@ -576,7 +602,7 @@ const Game = {
         STATE.h = Array.from({length:STATE.grid},()=>Array(STATE.grid-1).fill(false));
         STATE.v = Array.from({length:STATE.grid-1},()=>Array(STATE.grid).fill(false));
         STATE.b = Array.from({length:STATE.grid-1},()=>Array(STATE.grid-1).fill(0));
-        STATE.sc = [0,0,0]; STATE.turn = 1; STATE.sec = 0; STATE.moveTime = 0; STATE.hint = null; STATE.lastMove = null; History.reset();
+        STATE.sc = [0,0,0]; STATE.turn = 1; STATE.sec = 0; STATE.moveTime = 0; STATE.hint = null; STATE.lastMove = null; STATE.combo = 0; History.reset();
         clearInterval(STATE.timer); STATE.timer = setInterval(()=>this.tick(), 1000); UI.updHUD(); Render.flagDirty();
     },
     tick() {
@@ -612,9 +638,7 @@ const Game = {
         }
     },
     
-        apply(t,r,c, fromNet) {
-        // BUG FIX 1: Prevent duplicate lines. 
-        // This stops Player 2 from double-scoring when the Host echoes their move back to them.
+    apply(t,r,c, fromNet) {
         if (t === 'h' && STATE.h[r][c]) return;
         if (t === 'v' && STATE.v[r][c]) return;
 
@@ -629,11 +653,21 @@ const Game = {
 
         if(bf.length>0) { 
             STATE.sc[STATE.turn]+=bf.length; 
+            
+            // TRACK COMBO FOR ACHIEVEMENT
+            if(STATE.turn === 1) {
+                STATE.combo += bf.length;
+                if(STATE.combo >= 5 && !Replay.active) Profile.unlock('chain_master');
+            }
+
             if(!Replay.active) { 
                 AudioSys.playSFX('score'); AudioSys.haptic('score'); Profile.addXP(5*bf.length); 
                 bf.forEach(b=>Render.spawn(Render.ox+(b.c+0.5)*Render.sp, Render.oy+(b.r+0.5)*Render.sp, STATE.turn===1?STATE.p1.c:STATE.p2.c)); 
             }
         } else { 
+            // RESET COMBO ON MISS
+            if(STATE.turn === 1) STATE.combo = 0;
+
             if(!Replay.active) { AudioSys.playSFX('draw'); AudioSys.haptic('draw'); } 
             STATE.turn = STATE.turn===1?2:1; 
         }
@@ -641,7 +675,6 @@ const Game = {
         if(!Replay.active) History.save(); 
         Render.flagDirty(); UI.updHUD();
         
-        // BUG FIX 2: Check for (Net.conn || Net.host) so the Host successfully broadcasts moves.
         if(STATE.mode==='online' && !fromNet && (Net.conn || Net.host) && !Replay.active) {
             Net.send({type:'move', t, r, c});
         }
@@ -651,19 +684,39 @@ const Game = {
                 this.win();
             } else if(STATE.mode==='ai' && STATE.turn===2) {
                 document.getElementById('ai-think').style.display = 'inline';
-                setTimeout(() => { 
-                    document.getElementById('ai-think').style.display = 'none'; 
-                    AI.move(); 
-                }, 400);
+                setTimeout(() => { document.getElementById('ai-think').style.display = 'none'; AI.move(); }, 400);
             }
         }
     },
 
-
     win() {
         clearInterval(STATE.timer); let p1w = STATE.sc[1]>STATE.sc[2]; let tie = STATE.sc[1]===STATE.sc[2];
-        if(!STATE.spec) { Profile.data.matches++; if(p1w)Profile.data.wins++; else if(!tie)Profile.data.losses++; Profile.data.boxes+=STATE.sc[1]; Profile.addXP(p1w?100:20); if(STATE.isDaily&&p1w)Profile.unlock('daily'); Profile.save(); }
-        if(p1w) Profile.unlock('first_win'); if(STATE.sc[2]===0) Profile.unlock('perfect'); if(STATE.mode==='online'&&p1w) Profile.unlock('online_win'); if(STATE.mode==='ai'&&STATE.rules.aiL==='hard'&&p1w) Profile.unlock('ai_med'); if(STATE.mode==='ai'&&STATE.rules.aiL==='grandmaster'&&p1w) Profile.unlock('ai_exp');
+        if(!STATE.spec) { 
+            Profile.data.matches++; 
+            if(p1w) Profile.data.wins++; 
+            else if(!tie) Profile.data.losses++; 
+            Profile.data.boxes += STATE.sc[1]; 
+            
+            if(Profile.data.wins >= 10) Profile.unlock('win_10');
+            if(Profile.data.boxes >= 100) Profile.unlock('box_100');
+            if(Profile.data.boxes >= 1000) Profile.unlock('box_1000');
+            if(Profile.data.matches >= 50) Profile.unlock('veteran');
+
+            Profile.addXP(p1w?100:20); 
+            if(STATE.isDaily&&p1w) Profile.unlock('daily'); 
+            Profile.save(); 
+        }
+        if(p1w) {
+            Profile.unlock('first_win'); 
+            if(STATE.sc[2]===0) Profile.unlock('perfect'); 
+            if(STATE.mode==='online') Profile.unlock('online_win'); 
+            if(STATE.mode==='ai'&&STATE.rules.aiL==='hard') Profile.unlock('ai_med'); 
+            if(STATE.mode==='ai'&&STATE.rules.aiL==='grandmaster') Profile.unlock('ai_exp');
+            
+            if(STATE.sec < 60) Profile.unlock('speed_demon');
+            if(STATE.grid === 10) Profile.unlock('epic_win');
+            if(STATE.rules.blitz) Profile.unlock('blitz_king');
+        }
         
         UI.modal(tie?"Tie Game!":(p1w?STATE.p1.n:STATE.p2.n)+" Wins!", `<div class="grid-list"><div class="ach-card unlocked"><div class="ach-title">${STATE.sc[1]}-${STATE.sc[2]}</div><div class="ach-desc">Score</div></div><div class="ach-card unlocked"><div class="ach-title">${Utils.formatTime(STATE.sec)}</div><div class="ach-desc">Time</div></div></div>`, [
             {t:"Menu", cb:()=>{AudioSys.toggleBGM(false); UI.nav('scr-main');}}, {t:"Replay", cb:()=>Replay.init()}, {t:"Rematch", prim:true, cb:()=>{ if(STATE.mode==='online'&&!STATE.spec){Net.send({type:'req_rematch'}); UI.toast('Sent request...');} else {this.reset();} }}
@@ -673,62 +726,240 @@ const Game = {
 };
 
 /** =======================================================================
- * REPLAY SYSTEM
+ * REPLAY SYSTEM (PHASE 3 O(1) SNAPSHOT ARCHITECTURE)
  * ======================================================================= */
 const Replay = {
-    active: false, mvs: [], idx: 0, spd: 1, int: null,
-    init() { this.active=true; this.mvs=History.getMoveList(); this.idx=0; Utils.el('rep-slide').max=this.mvs.length; Utils.el('rep-slide').value=0; Utils.el('rep-bar').style.display='flex'; Game.start(STATE.mode, true); },
-    seek(v) { this.idx=parseInt(v); this.renderToIdx(); },
-    renderToIdx() {
-        STATE.h = Array.from({length:STATE.grid},()=>Array(STATE.grid-1).fill(false));
-        STATE.v = Array.from({length:STATE.grid-1},()=>Array(STATE.grid).fill(false));
-        STATE.b = Array.from({length:STATE.grid-1},()=>Array(STATE.grid-1).fill(0));
-        STATE.sc = [0,0,0]; STATE.turn = 1; STATE.lastMove = null;
+    active: false, snaps: [], idx: 0, spd: 1, int: null, showAnalytics: false,
+    
+    init() { 
+        this.active = true; 
+        this.showAnalytics = false;
         
-        for(let i=0;i<this.idx;i++) Game.apply(this.mvs[i].t, this.mvs[i].r, this.mvs[i].c, true);
+        let emptyState = {
+            h: Array.from({length:STATE.grid},()=>Array(STATE.grid-1).fill(false)),
+            v: Array.from({length:STATE.grid-1},()=>Array(STATE.grid).fill(false)),
+            b: Array.from({length:STATE.grid-1},()=>Array(STATE.grid-1).fill(0)),
+            sc: [0,0,0], turn: 1, lastMove: null
+        };
+        this.snaps = [emptyState, ...History.snaps];
+        
+        this.idx = 0; 
+        Utils.el('rep-slide').max = this.snaps.length - 1; 
+        Utils.el('rep-slide').value = 0; 
+        Utils.el('rep-bar').style.display = 'flex'; 
+        Utils.el('rep-ana').style.background = 'rgba(0,0,0,0.3)';
+        
+        Game.start(STATE.mode, true); 
+        this.renderToIdx(); 
+    },
+    seek(v) { 
+        this.idx = parseInt(v); 
+        this.renderToIdx(); 
+    },
+    renderToIdx() {
+        let s = this.snaps[this.idx];
+        STATE.h = Utils.clone(s.h);
+        STATE.v = Utils.clone(s.v);
+        STATE.b = Utils.clone(s.b);
+        STATE.sc = [...s.sc];
+        STATE.turn = s.turn;
+        STATE.lastMove = s.lastMove ? Utils.clone(s.lastMove) : null;
+        
         Render.flagDirty(); UI.updHUD();
     },
-    step() { if(this.idx<this.mvs.length) { this.idx++; Utils.el('rep-slide').value=this.idx; this.renderToIdx(); } else this.playPause(); },
-    playPause() { if(this.int) { clearInterval(this.int); this.int=null; Utils.el('rep-pp').textContent='▶'; } else { this.int=setInterval(()=>this.step(), 1000/this.spd); Utils.el('rep-pp').textContent='⏸'; } },
-    speed(f) { this.spd=f; UI.toast(`Speed: ${f}x`); if(this.int){this.playPause(); this.playPause();} },
-    exit() { this.active=false; if(this.int) clearInterval(this.int); clearInterval(STATE.timer); Utils.el('rep-bar').style.display='none'; UI.nav('scr-main'); AudioSys.toggleBGM(false); }
+    step() { 
+        if(this.idx < this.snaps.length - 1) { 
+            this.idx++; Utils.el('rep-slide').value = this.idx; this.renderToIdx(); 
+        } else { 
+            this.playPause(); 
+        } 
+    },
+    playPause() { 
+        if(this.int) { 
+            clearInterval(this.int); this.int=null; Utils.el('rep-pp').textContent='▶'; 
+        } else { 
+            this.int=setInterval(()=>this.step(), 1000/this.spd); Utils.el('rep-pp').textContent='⏸'; 
+        } 
+    },
+    speed(f) { 
+        this.spd=f; UI.toast(`Speed: ${f}x`); 
+        if(this.int){ this.playPause(); this.playPause(); } 
+    },
+    toggleAnalytics() {
+        this.showAnalytics = !this.showAnalytics;
+        Utils.el('rep-ana').style.background = this.showAnalytics ? 'var(--prim)' : 'rgba(0,0,0,0.3)';
+        Render.flagDirty();
+    },
+    exit() { 
+        this.active=false; if(this.int) clearInterval(this.int); clearInterval(STATE.timer); 
+        Utils.el('rep-bar').style.display='none'; UI.nav('scr-main'); AudioSys.toggleBGM(false); 
+    }
 };
 
 /** =======================================================================
- * AI ENGINE
+ * GRANDMASTER AI (PHASE 2 WEB WORKER)
  * ======================================================================= */
 const AI = {
-    getHint() { let m = this.compute(STATE.h, STATE.v, STATE.b, 'medium'); if(m) { STATE.hint=m; Render.flagDirty(); } },
-    move() { let m = this.compute(STATE.h, STATE.v, STATE.b, STATE.rules.aiL); if(m) Game.apply(m.t, m.r, m.c, false); },
-    cLines(r,c,h,v) { let n=0; if(h[r][c])n++; if(h[r+1][c])n++; if(v[r][c])n++; if(v[r][c+1])n++; return n; },
-    compute(h, v, b, lvl) {
-        let avail=[], sc=[], sf=[];
-        for(let r=0;r<STATE.grid;r++)for(let c=0;c<STATE.grid-1;c++)if(!h[r][c])avail.push({t:'h',r,c});
-        for(let r=0;r<STATE.grid-1;r++)for(let c=0;c<STATE.grid;c++)if(!v[r][c])avail.push({t:'v',r,c});
-        if(avail.length===0) return null;
+    worker: null,
+    isHinting: false,
+    initWorker() {
+        if(!this.worker) {
+            const aiWorkerCode = `
+            self.onmessage = function(e) {
+                const { h, v, b, grid, lvl, p1Score, p2Score } = e.data;
+                
+                function cLines(r, c, th, tv) {
+                    let n=0; if(th[r][c])n++; if(th[r+1][c])n++; if(tv[r][c])n++; if(tv[r][c+1])n++; return n;
+                }
+                
+                function getAvail(th, tv) {
+                    let avail=[];
+                    for(let r=0;r<grid;r++)for(let c=0;c<grid-1;c++)if(!th[r][c])avail.push({t:'h',r,c});
+                    for(let r=0;r<grid-1;r++)for(let c=0;c<grid;c++)if(!tv[r][c])avail.push({t:'v',r,c});
+                    return avail;
+                }
 
-        avail.forEach(m => {
-            let s=false, u=true;
-            if(m.t==='h'){ if(m.r>0){let cl=this.cLines(m.r-1,m.c,h,v); if(cl===3)s=true; if(cl===2)u=false;} if(m.r<STATE.grid-1){let cl=this.cLines(m.r,m.c,h,v); if(cl===3)s=true; if(cl===2)u=false;} }
-            else { if(m.c>0){let cl=this.cLines(m.r,m.c-1,h,v); if(cl===3)s=true; if(cl===2)u=false;} if(m.c<STATE.grid-1){let cl=this.cLines(m.r,m.c,h,v); if(cl===3)s=true; if(cl===2)u=false;} }
-            if(s) sc.push(m); if(u) sf.push(m);
-        });
+                let avail = getAvail(h, v);
+                if(avail.length === 0) { self.postMessage(null); return; }
 
-        const rnd = a => a[Math.floor(Math.random()*a.length)];
-        if(lvl==='easy') return rnd(avail);
-        if(lvl==='medium') { if(sc.length>0)return rnd(sc); return sf.length>0?rnd(sf):rnd(avail); }
-        
-        if(sc.length>0) return rnd(sc); 
-        if(sf.length>0) return rnd(sf);
-        
-        let minD = Infinity, best = [];
-        avail.forEach(m => {
-            let ch=Utils.clone(h), cv=Utils.clone(v), cb=Utils.clone(b), dmg=0, act=true;
-            if(m.t==='h')ch[m.r][m.c]=true; else cv[m.r][m.c]=true;
-            while(act){ act=false; for(let r=0;r<STATE.grid-1;r++)for(let c=0;c<STATE.grid-1;c++){ if(cb[r][c]===0 && this.cLines(r,c,ch,cv)===3){ if(!ch[r][c])ch[r][c]=true; else if(!ch[r+1][c])ch[r+1][c]=true; else if(!cv[r][c])cv[r][c]=true; else if(!cv[r][c+1])cv[r][c+1]=true; cb[r][c]=2; dmg++; act=true; } } }
-            if(dmg<minD){minD=dmg; best=[m];} else if(dmg===minD) best.push(m);
-        });
-        return rnd(best);
+                if(lvl === 'easy') { self.postMessage(avail[Math.floor(Math.random()*avail.length)]); return; }
+
+                let sc=[], sf=[];
+                avail.forEach(m => {
+                    let s=false, u=true;
+                    if(m.t==='h'){ 
+                        if(m.r>0){let cl=cLines(m.r-1,m.c,h,v); if(cl===3)s=true; if(cl===2)u=false;} 
+                        if(m.r<grid-1){let cl=cLines(m.r,m.c,h,v); if(cl===3)s=true; if(cl===2)u=false;} 
+                    } else { 
+                        if(m.c>0){let cl=cLines(m.r,m.c-1,h,v); if(cl===3)s=true; if(cl===2)u=false;} 
+                        if(m.c<grid-1){let cl=cLines(m.r,m.c,h,v); if(cl===3)s=true; if(cl===2)u=false;} 
+                    }
+                    if(s) sc.push(m); if(u) sf.push(m);
+                });
+
+                if(lvl === 'medium') {
+                    if(sc.length>0) { self.postMessage(sc[Math.floor(Math.random()*sc.length)]); return; }
+                    if(sf.length>0) { self.postMessage(sf[Math.floor(Math.random()*sf.length)]); return; }
+                    self.postMessage(avail[Math.floor(Math.random()*avail.length)]); return;
+                }
+
+                let maxDepth = (lvl === 'grandmaster') ? 5 : 3;
+                if (avail.length <= 14) maxDepth = 6;
+                if (avail.length <= 10) maxDepth = 10; 
+
+                const clone = arr => arr.map(a => a.slice());
+
+                function simulateMove(m, th, tv, tb, turn) {
+                    let nh = clone(th), nv = clone(tv), nb = clone(tb), scored = 0;
+                    if(m.t==='h') nh[m.r][m.c] = true; else nv[m.r][m.c] = true;
+                    
+                    const check = (r,c) => nh[r][c] && nh[r+1][c] && nv[r][c] && nv[r][c+1];
+                    if(m.t==='h') {
+                        if(m.r>0 && check(m.r-1, m.c)) { nb[m.r-1][m.c] = turn; scored++; }
+                        if(m.r<grid-1 && check(m.r, m.c)) { nb[m.r][m.c] = turn; scored++; }
+                    } else {
+                        if(m.c>0 && check(m.r, m.c-1)) { nb[m.r][m.c-1] = turn; scored++; }
+                        if(m.c<grid-1 && check(m.r, m.c)) { nb[m.r][m.c] = turn; scored++; }
+                    }
+                    return { scored, nh, nv, nb };
+                }
+
+                function evaluate(th, tv, tb, myScore, oppScore) {
+                    let score = (myScore - oppScore) * 100;
+                    if(lvl === 'grandmaster') {
+                        let giveAways = 0;
+                        for(let r=0;r<grid-1;r++) {
+                            for(let c=0;c<grid-1;c++) {
+                                if(tb[r][c]===0 && cLines(r,c,th,tv)===3) giveAways++;
+                            }
+                        }
+                        score -= giveAways * 10;
+                    }
+                    return score;
+                }
+
+                function minimax(th, tv, tb, depth, alpha, beta, isMaximizing, myScore, oppScore) {
+                    let moves = getAvail(th, tv);
+                    if(depth === 0 || moves.length === 0) return evaluate(th, tv, tb, myScore, oppScore);
+
+                    moves.sort((a,b) => {
+                        let sA=0, sB=0;
+                        if(a.t==='h'){ if(a.r>0&&cLines(a.r-1,a.c,th,tv)===3)sA++; if(a.r<grid-1&&cLines(a.r,a.c,th,tv)===3)sA++; }
+                        else { if(a.c>0&&cLines(a.r,a.c-1,th,tv)===3)sA++; if(a.c<grid-1&&cLines(a.r,a.c,th,tv)===3)sA++; }
+                        if(b.t==='h'){ if(b.r>0&&cLines(b.r-1,b.c,th,tv)===3)sB++; if(b.r<grid-1&&cLines(b.r,b.c,th,tv)===3)sB++; }
+                        else { if(b.c>0&&cLines(b.r,b.c-1,th,tv)===3)sB++; if(b.c<grid-1&&cLines(b.r,b.c,th,tv)===3)sB++; }
+                        return sB - sA;
+                    });
+
+                    if(isMaximizing) {
+                        let maxEval = -Infinity;
+                        for(let m of moves) {
+                            let { scored, nh, nv, nb } = simulateMove(m, th, tv, tb, 2);
+                            let ev = scored > 0 ? minimax(nh, nv, nb, depth - 1, alpha, beta, true, myScore + scored, oppScore) 
+                                                : minimax(nh, nv, nb, depth - 1, alpha, beta, false, myScore, oppScore);
+                            maxEval = Math.max(maxEval, ev);
+                            alpha = Math.max(alpha, ev);
+                            if(beta <= alpha) break;
+                        }
+                        return maxEval;
+                    } else {
+                        let minEval = Infinity;
+                        for(let m of moves) {
+                            let { scored, nh, nv, nb } = simulateMove(m, th, tv, tb, 1);
+                            let ev = scored > 0 ? minimax(nh, nv, nb, depth - 1, alpha, beta, false, myScore, oppScore + scored) 
+                                                : minimax(nh, nv, nb, depth - 1, alpha, beta, true, myScore, oppScore);
+                            minEval = Math.min(minEval, ev);
+                            beta = Math.min(beta, ev);
+                            if(beta <= alpha) break;
+                        }
+                        return minEval;
+                    }
+                }
+
+                let bestScore = -Infinity;
+                let bestMoves = [];
+                
+                for(let m of avail) {
+                    let { scored, nh, nv, nb } = simulateMove(m, h, v, b, 2);
+                    let score = scored > 0 ? minimax(nh, nv, nb, maxDepth, -Infinity, Infinity, true, p2Score + scored, p1Score)
+                                           : minimax(nh, nv, nb, maxDepth, -Infinity, Infinity, false, p2Score, p1Score);
+
+                    if(score > bestScore) { bestScore = score; bestMoves = [m]; } 
+                    else if(score === bestScore) { bestMoves.push(m); }
+                }
+                
+                self.postMessage(bestMoves[Math.floor(Math.random() * bestMoves.length)]);
+            }`;
+            
+            const blob = new Blob([aiWorkerCode], {type: 'application/javascript'});
+            this.worker = new Worker(URL.createObjectURL(blob));
+            
+            this.worker.onmessage = (e) => {
+                let m = e.data;
+                Utils.el('ai-think').style.display = 'none';
+                if(m) {
+                    if (this.isHinting) {
+                        STATE.hint = m; Render.flagDirty();
+                        this.isHinting = false;
+                    } else {
+                        Game.apply(m.t, m.r, m.c, false);
+                    }
+                }
+            };
+        }
+    },
+    getHint() { 
+        this.initWorker();
+        this.isHinting = true;
+        this.worker.postMessage({ h: STATE.h, v: STATE.v, b: STATE.b, grid: STATE.grid, lvl: 'medium', p1Score: STATE.sc[1], p2Score: STATE.sc[2] });
+    },
+    move() { 
+        this.initWorker();
+        this.isHinting = false;
+        Utils.el('ai-think').style.display = 'inline';
+        setTimeout(() => {
+            this.worker.postMessage({ h: STATE.h, v: STATE.v, b: STATE.b, grid: STATE.grid, lvl: STATE.rules.aiL, p1Score: STATE.sc[1], p2Score: STATE.sc[2] });
+        }, 50);
     }
 };
 
