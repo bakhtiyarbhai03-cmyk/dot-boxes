@@ -1,4 +1,4 @@
-const CACHE_NAME = 'db-ultra-v5-cache';
+const CACHE_NAME = 'db-ultra-v6-cache';
 const ASSETS_TO_CACHE = [
     './',
     './index.html',
