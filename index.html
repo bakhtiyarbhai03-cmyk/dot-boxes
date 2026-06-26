@@ -204,12 +204,12 @@
         <div class="card">
             <h2>🌐 Multiplayer</h2>
             <div class="net-ping" id="net-status"><div class="net-dot"></div> Offline</div>
-            <button class="btn primary" onclick="Net.host()">📡 Host Match</button>
+            <button class="btn primary" id="btn-host" onclick="Net.host()">📡 Host Match</button>
             <div id="host-ui" style="display:none; width:100%;"><input type="text" id="host-code" readonly style="text-align:center; font-family:monospace; letter-spacing:4px; color:var(--prim); font-size:1.5rem;"><button class="btn" onclick="UI.copy('host-code')">Copy Code</button></div>
             <div style="width:100%; height:1px; background:var(--bord); margin:15px 0;"></div>
             <input type="text" id="join-code" placeholder="Enter 8-Char Code" style="text-transform:uppercase; text-align:center; letter-spacing:4px;">
             <div class="row"><button class="btn secondary" onclick="Net.join(false)">Play</button><button class="btn" onclick="Net.join(true)">Spectate</button></div>
-            <button class="btn" onclick="UI.nav('scr-main'); Net.disconnect();" style="margin-top:10px;">Back</button>
+            <button class="btn" onclick="Net.disconnect(); UI.nav('scr-main');" style="margin-top:10px;">Back</button>
         </div>
     </div>
 
@@ -294,7 +294,7 @@ const CONST = {
 };
 
 /** =======================================================================
- * SECURITY & VALIDATION LAYER (PHASE 1)
+ * SECURITY & VALIDATION LAYER
  * ======================================================================= */
 const Security = {
     sanitize(str) {
@@ -332,11 +332,22 @@ const Profile = {
     data: { name: 'Player 1', emoji: '😎', xp: 0, level: 1, wins: 0, losses: 0, boxes: 0, matches: 0, playTime: 0, theme: 'cyberpunk', board: 6, cb: 'none', sfx: true, bgm: true },
     ach: {},
     init() {
-        this.data = Object.assign(this.data, JSON.parse(localStorage.getItem('db_ultra_prof')||'{}'));
-        this.ach = JSON.parse(localStorage.getItem('db_ultra_ach')||'{}');
+        try {
+            let savedProf = localStorage.getItem('db_ultra_prof');
+            if (savedProf) Object.assign(this.data, JSON.parse(savedProf));
+            let savedAch = localStorage.getItem('db_ultra_ach');
+            if (savedAch) this.ach = JSON.parse(savedAch);
+        } catch(e) { console.warn("Local storage blocked. Progress will not save."); }
+        
         this.checkLevel(); this.applyTheme();
     },
-    save() { localStorage.setItem('db_ultra_prof', JSON.stringify(this.data)); localStorage.setItem('db_ultra_ach', JSON.stringify(this.ach)); this.updateMenu(); },
+    save() { 
+        try {
+            localStorage.setItem('db_ultra_prof', JSON.stringify(this.data)); 
+            localStorage.setItem('db_ultra_ach', JSON.stringify(this.ach)); 
+        } catch(e) {}
+        this.updateMenu(); 
+    },
     checkLevel() { this.data.level = Math.max(1, Math.floor(Math.sqrt(this.data.xp) / 10)); },
     addXP(amt) { this.data.xp += amt; this.checkLevel(); this.save(); },
     getRank() { const l=this.data.level; return l<5?'Novice':l<10?'Apprentice':l<25?'Adept':l<50?'Expert':l<100?'Master':'Grandmaster'; },
@@ -362,7 +373,7 @@ const Profile = {
 };
 
 /** =======================================================================
- * UI & DYNAMIC DOM GENERATION (Fixed DOM Rendering)
+ * UI & DYNAMIC DOM GENERATION
  * ======================================================================= */
 const UI = {
     nav(id) { document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); Utils.el(id).classList.add('active'); if(id==='scr-main') Profile.updateMenu(); },
@@ -458,7 +469,7 @@ const ThemeMgr = {
 };
 
 /** =======================================================================
- * GAME STATE MANAGER & SNAPSHOTS (O(1) Memory Architecture)
+ * GAME STATE MANAGER & SNAPSHOTS
  * ======================================================================= */
 const STATE = {
     mode: '', rules: { limit: 0, blitz: false }, grid: 6, turn: 1, sc: [0,0,0],
@@ -473,7 +484,7 @@ const History = {
         const snap = { 
             h:Utils.clone(STATE.h), v:Utils.clone(STATE.v), b:Utils.clone(STATE.b), 
             sc:[...STATE.sc], turn:STATE.turn, lastMove: STATE.lastMove ? Utils.clone(STATE.lastMove) : null,
-            combo: STATE.combo // FIX: Save current combo state
+            combo: STATE.combo
         };
         this.snaps = this.snaps.slice(0, this.cur+1); this.snaps.push(snap); this.cur++;
         Utils.el('btn-undo').style.opacity = this.cur>0?1:0.3; Utils.el('btn-redo').style.opacity = this.cur<this.snaps.length-1?1:0.3;
@@ -484,19 +495,31 @@ const History = {
         this.cur = n; const s = this.snaps[n];
         STATE.h=Utils.clone(s.h); STATE.v=Utils.clone(s.v); STATE.b=Utils.clone(s.b); STATE.sc=[...s.sc]; STATE.turn=s.turn;
         STATE.lastMove = null; 
-        STATE.combo = s.combo || 0; // FIX: Restore combo state on undo/redo
+        STATE.combo = s.combo || 0;
         Utils.el('btn-undo').style.opacity = this.cur>0?1:0.3; Utils.el('btn-redo').style.opacity = this.cur<this.snaps.length-1?1:0.3;
         UI.updHUD(); Render.flagDirty();
+    },
+    undo() { this.load(-1); if(STATE.mode==='ai' && STATE.turn===2) this.load(-1); },
+    redo() { this.load(1); if(STATE.mode==='ai' && STATE.turn===2) this.load(1); },
+    getMoveList() { 
+        let m=[]; for(let i=1;i<this.snaps.length;i++){
+            let p=this.snaps[i-1], c=this.snaps[i];
+            for(let r=0;r<STATE.grid;r++)for(let l=0;l<STATE.grid-1;l++) if(!p.h[r][l]&&c.h[r][l]) m.push({t:'h',r,c:l,p:p.turn});
+            for(let r=0;r<STATE.grid-1;r++)for(let l=0;l<STATE.grid;l++) if(!p.v[r][l]&&c.v[r][l]) m.push({t:'v',r,c:l,p:p.turn});
+        } return m;
     }
 };
 
 /** =======================================================================
- * RENDER ENGINE (PHASE 3 SCALING OVERHAUL)
+ * RENDER ENGINE 
  * ======================================================================= */
 const Render = {
     cvs: Utils.el('gameCanvas'), ctx: Utils.el('gameCanvas').getContext('2d'),
-    sp: 0, ox: 0, oy: 0, anim: null, dirty: true, pool: [], bgT: 0,
-    init() { window.addEventListener('resize',()=>this.resize()); this.resize(); for(let i=0;i<200;i++)this.pool.push({a:false,x:0,y:0,vx:0,vy:0,l:0,c:''}); this.loop(); },
+    sp: 0, ox: 0, oy: 0, anim: null, dirty: true, pool: [], initialized: false,
+    init() { 
+        if(!this.initialized) { window.addEventListener('resize',()=>this.resize()); for(let i=0;i<200;i++)this.pool.push({a:false,x:0,y:0,vx:0,vy:0,l:0,c:''}); this.loop(); this.initialized=true; }
+        this.resize();
+    },
     resize() {
         const dpr = window.devicePixelRatio||1; const w=window.innerWidth, h=window.innerHeight;
         this.cvs.style.width=w+'px'; this.cvs.style.height=h+'px'; this.cvs.width=w*dpr; this.cvs.height=h*dpr;
@@ -515,7 +538,6 @@ const Render = {
         
         this.ctx.clearRect(0,0,this.cvs.width,this.cvs.height); this.dirty = false;
         
-        // Boxes - PHASE 3 UPGRADE: Scaled Emojis up to 65% of grid box size
         this.ctx.font = `900 ${this.sp*0.65}px var(--font)`; 
         this.ctx.textAlign='center'; this.ctx.textBaseline='middle';
         for (let r=0; r<STATE.grid-1; r++) for (let c=0; c<STATE.grid-1; c++) {
@@ -526,7 +548,6 @@ const Render = {
             }
         }
         
-        // Lines
         this.ctx.lineCap='round'; this.ctx.lineWidth=Math.max(4, this.sp*0.1);
         const drawL = (x1,y1,x2,y2, c) => { this.ctx.strokeStyle=c; this.ctx.beginPath(); this.ctx.moveTo(x1,y1); this.ctx.lineTo(x2,y2); this.ctx.stroke(); };
         let lm = STATE.lastMove;
@@ -540,14 +561,13 @@ const Render = {
             drawL(this.ox+c*this.sp, this.oy+r*this.sp, this.ox+c*this.sp, this.oy+(r+1)*this.sp, color);
         }
 
-        // PHASE 3 REPLAY ANALYTICS (Missed Box Highlighting)
         if (Replay.active && Replay.showAnalytics) {
             for (let r=0; r<STATE.grid-1; r++) {
                 for (let c=0; c<STATE.grid-1; c++) {
                     if (STATE.b[r][c] === 0) {
                         let lines = (STATE.h[r][c]?1:0) + (STATE.h[r+1][c]?1:0) + (STATE.v[r][c]?1:0) + (STATE.v[r][c+1]?1:0);
                         if (lines === 3) {
-                            this.ctx.fillStyle = 'rgba(239, 68, 68, 0.4)'; // Red background for Danger/Blunder
+                            this.ctx.fillStyle = 'rgba(239, 68, 68, 0.4)'; 
                             let bx = this.ox+(c+0.5)*this.sp, by = this.oy+(r+0.5)*this.sp;
                             this.ctx.fillRect(bx-this.sp*0.45, by-this.sp*0.45, this.sp*0.9, this.sp*0.9);
                             this.ctx.fillStyle = '#fff';
@@ -559,15 +579,12 @@ const Render = {
             }
         }
 
-        // Hint & Drag
         if (STATE.hint) { this.ctx.globalAlpha=Math.abs(Math.sin(Date.now()/200)); let h=STATE.hint; drawL(this.ox+h.c*this.sp, this.oy+h.r*this.sp, this.ox+(h.c+(h.t==='h'?1:0))*this.sp, this.oy+(h.r+(h.t==='v'?1:0))*this.sp, Utils.varColor('--warning')); this.ctx.globalAlpha=1; this.dirty=true; }
         if (Game.dragS && Game.dragC) { this.ctx.globalAlpha=0.5; drawL(Game.dragS.x, Game.dragS.y, Game.dragC.x, Game.dragC.y, STATE.turn===1?STATE.p1.c:STATE.p2.c); this.ctx.globalAlpha=1; this.dirty=true; }
 
-        // Dots
         this.ctx.fillStyle = Utils.varColor('--dot');
         for(let r=0; r<STATE.grid; r++) for(let c=0; c<STATE.grid; c++) { this.ctx.beginPath(); this.ctx.arc(this.ox+c*this.sp, this.oy+r*this.sp, Math.max(3, this.sp*0.08), 0, Math.PI*2); this.ctx.fill(); }
         
-        // Particles
         this.pool.forEach(p=>{ if(p.a) { this.ctx.globalAlpha=Math.max(0,p.l); this.ctx.fillStyle=p.c; this.ctx.beginPath(); this.ctx.arc(p.x,p.y,4,0,Math.PI*2); this.ctx.fill(); p.x+=p.vx; p.y+=p.vy; p.l-=0.05; if(p.l<=0)p.a=false; }}); this.ctx.globalAlpha=1;
     }
 };
@@ -579,6 +596,7 @@ const Game = {
     dragS: null, dragC: null,
     
     start(mode, isReplay=false) {
+        if (STATE.timer) clearInterval(STATE.timer);
         STATE.mode = mode; STATE.grid = parseInt(Utils.el('s-board').value);
         STATE.p1 = { n: Profile.data.name, s: Profile.data.emoji, c: Utils.varColor('--prim') };
         if(mode==='local'){ STATE.p2={n: Security.sanitize(Utils.el('loc-p2n').value||'P2'), s: Security.sanitize(Utils.el('loc-p2e').value||'👻'), c:Utils.varColor('--sec')}; STATE.rules.blitz=Utils.el('loc-mode').value!=='classic'; }
@@ -597,13 +615,17 @@ const Game = {
         STATE.isDaily=true; Utils.el('s-board').value=8; Utils.el('ai-lvl').value='grandmaster'; 
         this.start('ai'); STATE.rules.blitz=true;
     },
-    
+    cleanup() {
+        if (STATE.timer) clearInterval(STATE.timer);
+        STATE.mode = '';
+    },
     reset() {
+        if (STATE.timer) clearInterval(STATE.timer);
         STATE.h = Array.from({length:STATE.grid},()=>Array(STATE.grid-1).fill(false));
         STATE.v = Array.from({length:STATE.grid-1},()=>Array(STATE.grid).fill(false));
         STATE.b = Array.from({length:STATE.grid-1},()=>Array(STATE.grid-1).fill(0));
         STATE.sc = [0,0,0]; STATE.turn = 1; STATE.sec = 0; STATE.moveTime = 0; STATE.hint = null; STATE.lastMove = null; STATE.combo = 0; History.reset();
-        clearInterval(STATE.timer); STATE.timer = setInterval(()=>this.tick(), 1000); UI.updHUD(); Render.flagDirty();
+        STATE.timer = setInterval(()=>this.tick(), 1000); UI.updHUD(); Render.flagDirty();
     },
     tick() {
         if(Replay.active) return;
@@ -611,7 +633,7 @@ const Game = {
         if(STATE.rules.blitz) { STATE.moveTime++; if(STATE.moveTime > (Utils.el('loc-mode').value==='bullet'?10:30)) this.forcePass(); }
     },
     forcePass() { STATE.moveTime=0; STATE.turn=STATE.turn===1?2:1; UI.toast("Out of Time!"); UI.updHUD(); if(STATE.mode==='ai' && STATE.turn===2) AI.move(); },
-    quitPrompt() { UI.modal("Quit Match?", "Abandoning this game.", [{text:"Cancel"},{text:"Quit",prim:true,cb:()=>{clearInterval(STATE.timer); Net.disconnect(); AudioSys.toggleBGM(false); UI.nav('scr-main'); Profile.save();}}]); },
+    quitPrompt() { UI.modal("Quit Match?", "Abandoning this game.", [{text:"Cancel"},{text:"Quit",prim:true,cb:()=>{this.cleanup(); Net.disconnect(); AudioSys.toggleBGM(false); UI.nav('scr-main'); Profile.save();}}]); },
 
     genPuzzle() { 
         let total = (STATE.grid*(STATE.grid-1)*2); let fill = Math.floor(total*0.7);
@@ -654,7 +676,6 @@ const Game = {
         if(bf.length>0) { 
             STATE.sc[STATE.turn]+=bf.length; 
             
-            // TRACK COMBO FOR ACHIEVEMENT
             if(STATE.turn === 1) {
                 STATE.combo += bf.length;
                 if(STATE.combo >= 5 && !Replay.active) Profile.unlock('chain_master');
@@ -665,9 +686,7 @@ const Game = {
                 bf.forEach(b=>Render.spawn(Render.ox+(b.c+0.5)*Render.sp, Render.oy+(b.r+0.5)*Render.sp, STATE.turn===1?STATE.p1.c:STATE.p2.c)); 
             }
         } else { 
-            // RESET COMBO ON MISS
             if(STATE.turn === 1) STATE.combo = 0;
-
             if(!Replay.active) { AudioSys.playSFX('draw'); AudioSys.haptic('draw'); } 
             STATE.turn = STATE.turn===1?2:1; 
         }
@@ -683,14 +702,14 @@ const Game = {
             if(STATE.sc[1]+STATE.sc[2] === Math.pow(STATE.grid-1,2)) {
                 this.win();
             } else if(STATE.mode==='ai' && STATE.turn===2) {
-                document.getElementById('ai-think').style.display = 'inline';
-                setTimeout(() => { document.getElementById('ai-think').style.display = 'none'; AI.move(); }, 400);
+                AI.move();
             }
         }
     },
 
     win() {
-        clearInterval(STATE.timer); let p1w = STATE.sc[1]>STATE.sc[2]; let tie = STATE.sc[1]===STATE.sc[2];
+        if (STATE.timer) clearInterval(STATE.timer);
+        let p1w = STATE.sc[1]>STATE.sc[2]; let tie = STATE.sc[1]===STATE.sc[2];
         if(!STATE.spec) { 
             Profile.data.matches++; 
             if(p1w) Profile.data.wins++; 
@@ -726,7 +745,7 @@ const Game = {
 };
 
 /** =======================================================================
- * REPLAY SYSTEM (PHASE 3 O(1) SNAPSHOT ARCHITECTURE)
+ * REPLAY SYSTEM
  * ======================================================================= */
 const Replay = {
     active: false, snaps: [], idx: 0, spd: 1, int: null, showAnalytics: false,
@@ -791,17 +810,25 @@ const Replay = {
         Render.flagDirty();
     },
     exit() { 
-        this.active=false; if(this.int) clearInterval(this.int); clearInterval(STATE.timer); 
+        this.active=false; if(this.int) clearInterval(this.int); if (STATE.timer) clearInterval(STATE.timer); 
         Utils.el('rep-bar').style.display='none'; UI.nav('scr-main'); AudioSys.toggleBGM(false); 
     }
 };
 
 /** =======================================================================
- * GRANDMASTER AI (PHASE 2 WEB WORKER)
+ * AI ENGINE
  * ======================================================================= */
 const AI = {
     worker: null,
     isHinting: false,
+    
+    getAvail(th, tv) {
+        let avail=[];
+        for(let r=0;r<STATE.grid;r++)for(let c=0;c<STATE.grid-1;c++)if(!th[r][c])avail.push({t:'h',r,c});
+        for(let r=0;r<STATE.grid-1;r++)for(let c=0;c<STATE.grid;c++)if(!tv[r][c])avail.push({t:'v',r,c});
+        return avail;
+    },
+
     initWorker() {
         if(!this.worker) {
             const aiWorkerCode = `
@@ -843,13 +870,9 @@ const AI = {
                     self.postMessage(avail[Math.floor(Math.random()*avail.length)]); return;
                 }
 
-                                // OPTIMIZED DEPTH SCALING for JavaScript Web Workers
                 let maxDepth = (lvl === 'grandmaster') ? 4 : 2; 
-                
-                // Only deepen the search when the branching factor is small enough to not lag
                 if (avail.length <= 12) maxDepth = 5;
-                if (avail.length <= 8) maxDepth = 8; // Solves the exact endgame instantly
- 
+                if (avail.length <= 8) maxDepth = 8; 
 
                 const clone = arr => arr.map(a => a.slice());
 
@@ -961,9 +984,18 @@ const AI = {
         this.initWorker();
         this.isHinting = false;
         Utils.el('ai-think').style.display = 'inline';
-        setTimeout(() => {
-            this.worker.postMessage({ h: STATE.h, v: STATE.v, b: STATE.b, grid: STATE.grid, lvl: STATE.rules.aiL, p1Score: STATE.sc[1], p2Score: STATE.sc[2] });
-        }, 50);
+        
+        const watchdog = setTimeout(() => {
+            if (Utils.el('ai-think').style.display !== 'none') {
+                if (this.worker) { this.worker.terminate(); this.worker = null; }
+                Utils.el('ai-think').style.display = 'none';
+                let avail = this.getAvail(STATE.h, STATE.v);
+                let m = avail[Math.floor(Math.random()*avail.length)];
+                if(m) Game.apply(m.t, m.r, m.c, false);
+            }
+        }, 5000);
+
+        this.worker.postMessage({ h: STATE.h, v: STATE.v, b: STATE.b, grid: STATE.grid, lvl: STATE.rules.aiL, p1Score: STATE.sc[1], p2Score: STATE.sc[2] });
     }
 };
 
@@ -973,13 +1005,24 @@ const AI = {
 const Net = {
     peer: null, conn: null, host: false, conns: [], pingInt: null,
     update(m) { Utils.el('net-status').innerHTML = `<div class="net-dot"></div> ${Security.sanitize(m)}`; },
-    disconnect() { this.conns.forEach(c=>c.close()); if(this.conn)this.conn.close(); if(this.peer)this.peer.destroy(); this.conns=[]; this.conn=null; this.peer=null; Utils.el('host-ui').style.display='none'; clearInterval(this.pingInt); },
+    disconnect() { 
+        this.conns.forEach(c=>c.close()); 
+        if(this.conn)this.conn.close(); 
+        if(this.peer)this.peer.destroy(); 
+        this.conns=[]; this.conn=null; this.peer=null; 
+        Utils.el('host-ui').style.display='none'; 
+        Utils.el('btn-host').style.display='flex'; 
+        clearInterval(this.pingInt);
+        Game.cleanup();
+    },
     send(d) { if(this.host) this.conns.forEach(c=>c.send(d)); else if(this.conn) this.conn.send(d); },
     sendChat(m) { this.send({type:'chat', msg:m}); this.showChat(STATE.p1.n, m); Utils.el('q-chat').style.display='none'; },
     showChat(n, m) { const b=Utils.el('chat-box'), d=document.createElement('div'); d.className='chat-msg'; d.textContent=`${n}: ${m}`; b.appendChild(d); b.scrollTop=b.scrollHeight; setTimeout(()=>d.remove(), 5000); },
     
     host() {
-        const code = Utils.genId(); this.update("Creating..."); this.host=true; this.peer=new Peer('db-uv5-'+code);
+        const code = Utils.genId(); this.update("Creating..."); this.host=true; 
+        Utils.el('btn-host').style.display='none';
+        this.peer=new Peer('db-uv5-'+code);
         this.peer.on('open', ()=>{ this.update("Waiting for players..."); Utils.el('host-code').value=code; Utils.el('host-ui').style.display='flex'; });
         this.peer.on('connection', c=>{ this.conns.push(c); this.events(c); });
         this.peer.on('error', ()=>UI.toast("Network Error"));
