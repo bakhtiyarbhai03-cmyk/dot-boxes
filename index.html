@@ -843,9 +843,13 @@ const AI = {
                     self.postMessage(avail[Math.floor(Math.random()*avail.length)]); return;
                 }
 
-                let maxDepth = (lvl === 'grandmaster') ? 5 : 3;
-                if (avail.length <= 14) maxDepth = 6;
-                if (avail.length <= 10) maxDepth = 10; 
+                                // OPTIMIZED DEPTH SCALING for JavaScript Web Workers
+                let maxDepth = (lvl === 'grandmaster') ? 4 : 2; 
+                
+                // Only deepen the search when the branching factor is small enough to not lag
+                if (avail.length <= 12) maxDepth = 5;
+                if (avail.length <= 8) maxDepth = 8; // Solves the exact endgame instantly
+ 
 
                 const clone = arr => arr.map(a => a.slice());
 
